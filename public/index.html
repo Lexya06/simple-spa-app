@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Лабораторная №2 - SPA Менеджер задач</title>
+    
+    <!-- Flatpickr (выбор даты и времени) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/material_blue.css">
+    
+    <!-- Стили приложения -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- Контейнер для всплывающих уведомлений (Toasts) -->
+<div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+<div class="container">
+    <header class="app-header">
+        <div class="header-title">
+            <h1>📋 SPA Менеджер задач</h1>
+        </div>
+        <p class="header-subtitle">Лабораторная работа №2</p>
+    </header>
+
+    <!-- Блок глобальных предупреждений/ошибок -->
+    <div id="global-alert" class="alert alert-danger" style="display: none;">
+        <span id="global-alert-text"></span>
+        <button type="button" class="alert-close" onclick="hideGlobalAlert()">✕</button>
+    </div>
+
+    <!-- Форма создания новой задачи -->
+    <section class="card form-card">
+        <h2>➕ Новая задача</h2>
+        <form id="create-task-form" novalidate>
+            <!-- Блок серверных ошибок валидации формы -->
+            <div id="form-validation-errors" class="validation-summary" style="display: none;"></div>
+
+            <div class="form-group">
+                <label for="task-title">Название задачи <span class="required-star">*</span></label>
+                <input type="text" id="task-title" name="title" placeholder="Введите название задачи..." required autocomplete="off">
+                <div class="field-error-msg" id="error-task-title"></div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group flex-1">
+                    <label for="task-dueDate">Срок выполнения:</label>
+                    <div class="date-input-wrapper">
+                        <input type="text" id="task-dueDate" name="dueDate" placeholder="Выберите срок..." readonly>
+                        <button type="button" class="btn-clear" id="btn-clear-date" title="Очистить дату">✕</button>
+                    </div>
+                    <label class="time-toggle-label">
+                        <input type="checkbox" id="task-includeTimeToggle">
+                        <span>Указать точное время</span>
+                    </label>
+                    <div class="field-error-msg" id="error-task-dueDate"></div>
+                </div>
+
+                <div class="form-group flex-1">
+                    <label for="task-status">Статус:</label>
+                    <select id="task-status" name="status">
+                        <option value="pending">Ожидает</option>
+                        <option value="in_progress">В процессе</option>
+                        <option value="completed">Завершено</option>
+                    </select>
+                    <div class="field-error-msg" id="error-task-status"></div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="task-attachment">Прикрепить файл:</label>
+                <div class="file-drop-area">
+                    <input type="file" id="task-attachment" name="attachment">
+                    <span class="file-hint">Макс. размер: 15 МБ</span>
+                </div>
+                <div id="create-file-badge" class="file-status-badge"></div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" id="btn-submit-task" class="btn btn-primary">
+                    <span class="btn-icon">💾</span> Добавить задачу
+                </button>
+                <button type="button" id="btn-reset-form" class="btn btn-secondary">
+                    Очистить
+                </button>
+            </div>
+        </form>
+    </section>
+
+    <!-- Панель управления списком (фильтры, поиск, счетчики) -->
+    <section class="controls-panel">
+        <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="search-input" placeholder="Поиск по названию задачи..." autocomplete="off">
+            <button type="button" id="btn-clear-search" class="btn-clear-search" style="display: none;">✕</button>
+        </div>
+
+        <div class="filter-tabs">
+            <button class="filter-tab active" data-filter="all">
+                Все <span class="counter" id="count-all">0</span>
+            </button>
+            <button class="filter-tab" data-filter="pending">
+                Ожидают <span class="counter" id="count-pending">0</span>
+            </button>
+            <button class="filter-tab" data-filter="in_progress">
+                В процессе <span class="counter" id="count-in_progress">0</span>
+            </button>
+            <button class="filter-tab" data-filter="completed">
+                Завершены <span class="counter" id="count-completed">0</span>
+            </button>
+        </div>
+    </section>
+
+    <!-- Список задач -->
+    <section class="tasks-section">
+        <div class="tasks-header">
+            <h2>Список задач</h2>
+            <button type="button" id="btn-refresh-tasks" class="btn btn-sm btn-outline" title="Обновить список">
+                🔄 Обновить
+            </button>
+        </div>
+
+        <!-- Индикатор загрузки -->
+        <div id="loading-spinner" class="loading-state" style="display: none;">
+            <div class="spinner"></div>
+            <p>Загрузка данных с сервера...</p>
+        </div>
+
+        <!-- Контейнер для отображения задач -->
+        <ul id="task-list" class="task-list"></ul>
+
+        <!-- Состояние пустого списка -->
+        <div id="empty-state" class="empty-state" style="display: none;">
+            <div class="empty-icon">📭</div>
+            <p class="empty-title">Задачи не найдены</p>
+            <p class="empty-subtitle">Создайте новую задачу или измените параметры фильтрации.</p>
+        </div>
+    </section>
+</div>
+
+<!-- Модальное окно редактирования задачи (PUT /api/tasks/:id) -->
+<div id="edit-modal" class="modal" aria-hidden="true">
+    <div class="modal-backdrop" onclick="closeEditModal()"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="edit-modal-title">✏️ Редактирование задачи</h3>
+                <button type="button" class="modal-close-btn" onclick="closeEditModal()">✕</button>
+            </div>
+            <form id="edit-task-form" novalidate>
+                <input type="hidden" id="edit-task-id" name="id">
+                
+                <div id="edit-validation-errors" class="validation-summary" style="display: none;"></div>
+
+                <div class="form-group">
+                    <label for="edit-title">Название задачи <span class="required-star">*</span></label>
+                    <input type="text" id="edit-title" name="title" required autocomplete="off">
+                    <div class="field-error-msg" id="error-edit-title"></div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group flex-1">
+                        <label for="edit-dueDate">Срок выполнения:</label>
+                        <div class="date-input-wrapper">
+                            <input type="text" id="edit-dueDate" name="dueDate" placeholder="Выберите срок..." readonly>
+                            <button type="button" class="btn-clear" id="btn-clear-edit-date" title="Очистить дату">✕</button>
+                        </div>
+                        <label class="time-toggle-label">
+                            <input type="checkbox" id="edit-includeTimeToggle">
+                            <span>Указать точное время</span>
+                        </label>
+                        <div class="field-error-msg" id="error-edit-dueDate"></div>
+                    </div>
+
+                    <div class="form-group flex-1">
+                        <label for="edit-status">Статус:</label>
+                        <select id="edit-status" name="status">
+                            <option value="pending">Ожидает</option>
+                            <option value="in_progress">В процессе</option>
+                            <option value="completed">Завершено</option>
+                        </select>
+                        <div class="field-error-msg" id="error-edit-status"></div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Прикрепленный файл:</label>
+                    <div id="current-attachment-box" class="current-attachment-box" style="display: none;">
+                        <span class="attachment-info">📎 <span id="current-filename"></span></span>
+                        <label class="remove-attachment-label">
+                            <input type="checkbox" id="edit-removeAttachment" name="removeAttachment" value="true">
+                            <span>Удалить этот файл</span>
+                        </label>
+                    </div>
+                    <label for="edit-attachment" style="font-weight: normal; margin-top: 8px;">
+                        Загрузить новый файл взамен текущего:
+                    </label>
+                    <input type="file" id="edit-attachment" name="attachment">
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeEditModal()">Отмена</button>
+                    <button type="submit" id="btn-save-edit" class="btn btn-primary">
+                        💾 Сохранить изменения
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно подтверждения удаления (DELETE /api/tasks/:id) -->
+<div id="delete-modal" class="modal" aria-hidden="true">
+    <div class="modal-backdrop" onclick="closeDeleteModal()"></div>
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🗑️ Удаление задачи</h3>
+                <button type="button" class="modal-close-btn" onclick="closeDeleteModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <p>Вы действительно хотите удалить задачу: <br><strong id="delete-task-title"></strong>?</p>
+                <p class="modal-warning-text">Это действие необратимо. Прикрепленный файл также будет удален с сервера.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeDeleteModal()">Отмена</button>
+                <button type="button" id="btn-confirm-delete" class="btn btn-danger">Удалить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Библиотеки и скрипты клиента -->
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js"></script>
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

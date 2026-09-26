@@ -1,0 +1,10 @@
+node_modules/
+todo.db
+todo.db-journal
+todo.db-shm
+todo.db-wal
+uploads/*
+!uploads/.gitkeep
+.vscode/
+.DS_Store
+npm-debug.log*

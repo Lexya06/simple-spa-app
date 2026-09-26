@@ -1,0 +1,16 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: spa-todo-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+    volumes:
+      # Сохранение базы данных и загруженных файлов на хосте при перезапусках
+      - ./uploads:/app/uploads
+      - ./todo.db:/app/todo.db
