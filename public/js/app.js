@@ -29,7 +29,6 @@ const elements = {
     searchInput: document.getElementById('search-input'),
     btnClearSearch: document.getElementById('btn-clear-search'),
     filterTabs: document.querySelectorAll('.filter-tab'),
-    btnRefresh: document.getElementById('btn-refresh-tasks'),
 
     // Счетчики
     countAll: document.getElementById('count-all'),
@@ -170,11 +169,15 @@ function clearFormErrors(errorBoxElement, formElement) {
 /**
  * Загрузить задачи с сервера и отрендерить список
  */
-async function loadTasks() {
+async function loadTasks(isInitial = false) {
     state.isLoading = true;
-    elements.loadingSpinner.style.display = 'flex';
-    elements.taskList.style.display = 'none';
-    elements.emptyState.style.display = 'none';
+
+    // Спиннер показываем только при первой инициализации приложения, если список пуст
+    if (isInitial && state.tasks.length === 0) {
+        elements.loadingSpinner.style.display = 'flex';
+        elements.taskList.style.display = 'none';
+        elements.emptyState.style.display = 'none';
+    }
     hideGlobalAlert();
 
     try {
@@ -222,12 +225,87 @@ async function updateCounters() {
 }
 
 /**
- * Отрисовка списка задач в DOM
+ * Создание DOM-элемента карточки задачи
+ */
+function createTaskElement(task) {
+    const statusLabels = {
+        pending: 'Ожидает',
+        in_progress: 'В процессе',
+        completed: 'Завершено'
+    };
+
+    const li = document.createElement('li');
+    li.className = `task-item ${task.status}`;
+    li.dataset.id = task.id;
+    li.dataset.rawJson = JSON.stringify(task);
+
+    const formattedDueDate = task.dueDate ? formatDisplayDate(task.dueDate) : 'Без срока';
+
+    let attachmentHtml = '';
+    if (task.attachment) {
+        attachmentHtml = `
+            <div class="task-attachment-info">
+                📎 Вложение: 
+                <a href="${task.attachment.downloadUrl}" target="_blank" rel="noopener noreferrer" download="${escapeHtml(task.attachment.originalName)}">
+                    ${escapeHtml(task.attachment.originalName)}
+                </a>
+            </div>
+        `;
+    }
+
+    li.innerHTML = `
+        <div class="task-info">
+            <div class="task-title">${escapeHtml(task.title)}</div>
+            <div class="task-meta">
+                <span>⏰ Срок: <strong>${formattedDueDate}</strong></span>
+                <span>•</span>
+                <span>Статус: <span class="badge badge-${task.status}">${statusLabels[task.status] || task.status}</span></span>
+            </div>
+            ${attachmentHtml}
+        </div>
+
+        <div class="task-actions">
+            <!-- Быстрое изменение статуса через REST API PATCH -->
+            <select class="status-select" data-action="quick-status" title="Изменить статус">
+                <option value="pending" ${task.status === 'pending' ? 'selected' : ''}>Ожидает</option>
+                <option value="in_progress" ${task.status === 'in_progress' ? 'selected' : ''}>В процессе</option>
+                <option value="completed" ${task.status === 'completed' ? 'selected' : ''}>Завершено</option>
+            </select>
+
+            <!-- Кнопка редактирования (открывает модалку PUT) -->
+            <button type="button" class="btn btn-sm btn-secondary" data-action="edit" title="Редактировать">
+                ✏️
+            </button>
+
+            <!-- Кнопка удаления (открывает диалог DELETE) -->
+            <button type="button" class="btn btn-sm btn-danger" data-action="delete" title="Удалить">
+                🗑️
+            </button>
+        </div>
+    `;
+
+    // Слушатели действий внутри карточки задачи
+    const selectStatus = li.querySelector('[data-action="quick-status"]');
+    selectStatus.addEventListener('change', async (e) => {
+        const newStatus = e.target.value;
+        await handleQuickStatusChange(task.id, newStatus, selectStatus);
+    });
+
+    const btnEdit = li.querySelector('[data-action="edit"]');
+    btnEdit.addEventListener('click', () => openEditModal(task));
+
+    const btnDelete = li.querySelector('[data-action="delete"]');
+    btnDelete.addEventListener('click', () => openDeleteModal(task));
+
+    return li;
+}
+
+/**
+ * Отрисовка списка задач в DOM без мерцания и с сохранением неизмененных нод
  */
 function renderTaskList() {
-    elements.taskList.innerHTML = '';
-
     if (!state.tasks || state.tasks.length === 0) {
+        elements.taskList.innerHTML = '';
         elements.taskList.style.display = 'none';
         elements.emptyState.style.display = 'block';
         return;
@@ -236,77 +314,23 @@ function renderTaskList() {
     elements.emptyState.style.display = 'none';
     elements.taskList.style.display = 'flex';
 
-    const statusLabels = {
-        pending: 'Ожидает',
-        in_progress: 'В процессе',
-        completed: 'Завершено'
-    };
-
-    state.tasks.forEach(task => {
-        const li = document.createElement('li');
-        li.className = `task-item ${task.status}`;
-        li.dataset.id = task.id;
-
-        const formattedDueDate = task.dueDate ? formatDisplayDate(task.dueDate) : 'Без срока';
-
-        let attachmentHtml = '';
-        if (task.attachment) {
-            attachmentHtml = `
-                <div class="task-attachment-info">
-                    📎 Вложение: 
-                    <a href="${task.attachment.downloadUrl}" target="_blank" rel="noopener noreferrer" download="${escapeHtml(task.attachment.originalName)}">
-                        ${escapeHtml(task.attachment.originalName)}
-                    </a>
-                </div>
-            `;
-        }
-
-        li.innerHTML = `
-            <div class="task-info">
-                <div class="task-title">${escapeHtml(task.title)}</div>
-                <div class="task-meta">
-                    <span>⏰ Срок: <strong>${formattedDueDate}</strong></span>
-                    <span>•</span>
-                    <span>Статус: <span class="badge badge-${task.status}">${statusLabels[task.status] || task.status}</span></span>
-                </div>
-                ${attachmentHtml}
-            </div>
-
-            <div class="task-actions">
-                <!-- Быстрое изменение статуса через REST API PATCH -->
-                <select class="status-select" data-action="quick-status" title="Изменить статус">
-                    <option value="pending" ${task.status === 'pending' ? 'selected' : ''}>Ожидает</option>
-                    <option value="in_progress" ${task.status === 'in_progress' ? 'selected' : ''}>В процессе</option>
-                    <option value="completed" ${task.status === 'completed' ? 'selected' : ''}>Завершено</option>
-                </select>
-
-                <!-- Кнопка редактирования (открывает модалку PUT) -->
-                <button type="button" class="btn btn-sm btn-secondary" data-action="edit" title="Редактировать">
-                    ✏️
-                </button>
-
-                <!-- Кнопка удаления (открывает диалог DELETE) -->
-                <button type="button" class="btn btn-sm btn-danger" data-action="delete" title="Удалить">
-                    🗑️
-                </button>
-            </div>
-        `;
-
-        // Слушатели действий внутри карточки задачи
-        const selectStatus = li.querySelector('[data-action="quick-status"]');
-        selectStatus.addEventListener('change', async (e) => {
-            const newStatus = e.target.value;
-            await handleQuickStatusChange(task.id, newStatus, selectStatus);
-        });
-
-        const btnEdit = li.querySelector('[data-action="edit"]');
-        btnEdit.addEventListener('click', () => openEditModal(task));
-
-        const btnDelete = li.querySelector('[data-action="delete"]');
-        btnDelete.addEventListener('click', () => openDeleteModal(task));
-
-        elements.taskList.appendChild(li);
+    // Индексируем существующие карточки по ID
+    const existingMap = new Map();
+    elements.taskList.querySelectorAll('.task-item').forEach(el => {
+        existingMap.set(Number(el.dataset.id), el);
     });
+
+    // Переиспользуем неизмененные DOM-элементы или создаем новые
+    const newNodes = state.tasks.map(task => {
+        const existing = existingMap.get(task.id);
+        if (existing && existing.dataset.rawJson === JSON.stringify(task)) {
+            return existing;
+        }
+        return createTaskElement(task);
+    });
+
+    // Атомарное обновление списка без промежуточного белого экрана
+    elements.taskList.replaceChildren(...newNodes);
 }
 
 /**
@@ -679,11 +703,6 @@ elements.btnClearSearch.addEventListener('click', () => {
     loadTasks();
 });
 
-elements.btnRefresh.addEventListener('click', () => {
-    loadTasks();
-    showToast('Список задач обновлен', 'info', 2000);
-});
-
 // ============================================================================
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 // ============================================================================
@@ -742,5 +761,5 @@ window.addEventListener('DOMContentLoaded', async () => {
     restoreFileDraft();
 
     // 2. Первоначальная загрузка задач через REST API
-    await loadTasks();
+    await loadTasks(true);
 });
